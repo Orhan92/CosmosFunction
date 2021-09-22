@@ -4,9 +4,16 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.WebJobs;
 using Microsoft.Azure.WebJobs.Extensions.Http;
+using Microsoft.Azure.WebJobs.Host;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
 using Newtonsoft.Json;
+using System.Linq;
+using Microsoft.Azure.Cosmos;
+using Microsoft.Azure.Documents.Client;
+using System.ComponentModel;
+using Microsoft.Azure.Documents.Linq;
 
 namespace CosmosFunction
 {
@@ -15,21 +22,47 @@ namespace CosmosFunction
         [FunctionName("CosmosFunctionGet")]
         public static async Task<IActionResult> Run(
             [HttpTrigger(AuthorizationLevel.Function, "get", Route = null)] HttpRequest req,
+            [CosmosDB(
+            databaseName: "Music-database", 
+            collectionName: "songs",
+            ConnectionStringSetting = "CosmosDbConnectionString")] DocumentClient client,
             ILogger log)
         {
             log.LogInformation("C# HTTP trigger function processed a request.");
 
-            string name = req.Query["name"];
+            try 
+            {
+                var searchterm = req.Query["searchterm"];
+                if (string.IsNullOrWhiteSpace(searchterm))
+                {
+                    return (ActionResult)new NotFoundResult();
+                }
 
-            string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-            dynamic data = JsonConvert.DeserializeObject(requestBody);
-            name = name ?? data?.name;
+                Uri collectionUri = UriFactory.CreateDocumentCollectionUri("Music-database", "songs");
 
-            string responseMessage = string.IsNullOrEmpty(name)
-                ? "This HTTP triggered function executed successfully. Pass a name in the query string or in the request body for a personalized response."
-                : $"Hello, {name}. This HTTP triggered function executed successfully.";
+                log.LogInformation($"Searching for: {searchterm}");
 
-            return new OkObjectResult(responseMessage);
+                IDocumentQuery<SongModel> query = client.CreateDocumentQuery<SongModel>(collectionUri, new FeedOptions { EnableCrossPartitionQuery = true})
+                    .Where(p => p.Artist.Contains(searchterm))
+                    .AsDocumentQuery();
+                
+                //list to store objects inside a temporary list so that we can print the object in OkObjectResult below.
+                var list = new List<SongModel>();
+                while (query.HasMoreResults)
+                {
+                    foreach (SongModel result in await query.ExecuteNextAsync())
+                    {
+                        list.Add(result);
+                        log.LogInformation($"{result.Artist} - {result.Title}");
+                    }
+                }
+                return new OkObjectResult(list);
+            }
+            catch (Exception ex)
+            {
+                log.LogError($"We could not GET your requested data from the database. Exception thrown: {ex.Message}");
+                return new StatusCodeResult(StatusCodes.Status400BadRequest);
+            }
         }
     }
 }
