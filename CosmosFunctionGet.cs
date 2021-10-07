@@ -57,7 +57,7 @@ namespace CosmosFunction
                     }
                 }
                 return new OkObjectResult(list);
-            }
+            } 
             catch (Exception ex)
             {
                 log.LogError($"We could not GET your requested data from the database. Exception thrown: {ex.Message}");
